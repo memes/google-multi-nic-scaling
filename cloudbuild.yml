@@ -1,0 +1,46 @@
+# A generic Cloud Build declaration that will create a BIG-IP image with GVE
+# driver
+---
+# yamllint disable rule:line-length
+steps:
+  - id: 'copy-bigip-files'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:slim'
+    entrypoint: 'gsutil'
+    args: [
+      '-m', 'cp',
+      # Copy the GVE RPM to install
+      'gs://$_ARTIFACTS_BUCKET/$_GVE_PATH/$_GVE_RPM',
+      # Copy the public key used for signature
+      'gs://$_ARTIFACTS_BUCKET/$_BIGIP_SIG_PUBKEY_PATH/$_BIGIP_SIG_PUBKEY_NAME',
+      # Copy the iso and sig to the shared /workspace
+      'gs://$_ARTIFACTS_BUCKET/$_BIGIP_ISO_PATH/$_BIGIP_ISO_NAME',
+      'gs://$_ARTIFACTS_BUCKET/$_BIGIP_ISO_PATH/$_BIGIP_ISO_NAME.384.sig',
+      # to the shared workspace
+      '/workspace/'
+    ]
+  - id: 'build-bigip-image'
+    name: 'gcr.io/$PROJECT_ID/bigip-image-generator:$_BIGIP_IMAGE_GENERATOR_TAG'
+    entrypoint: '/workdir/build-image'
+    args: [
+      '-b', '1',
+      '-i', '/workspace/$_BIGIP_ISO_NAME',
+      '--iso-sig-verification-public-key', '/workspace/$_BIGIP_SIG_PUBKEY_NAME',
+      '-m', 'all',
+      '-p', 'gce',
+      '--update-image-files', '[{"source":"/workspace/$_GVE_RPM", "destination":"/config/$_GVE_RPM", "mode":"600"}]',
+      '--image-tags', '[{"name":"emes-15-all-1slot"}, {"iso":"$_BIGIP_ISO_NAME"}]',
+      '--gce-image-family-name', 'emes-bigip-15-all-1slot',
+      '--gce-bucket', '$_ARTIFACTS_BUCKET'
+    ]
+substitutions:
+  _ARTIFACTS_BUCKET: ''
+  _GVE_PATH: ''
+  _GVE_RPM: ''
+  _BIGIP_SIG_PUBKEY_PATH: ''
+  _BIGIP_SIG_PUBKEY_NAME: ''
+  _BIGIP_ISO_PATH: ''
+  _BIGIP_ISO_NAME: ''
+  _BIGIP_IMAGE_GENERATOR_TAG: ''
+timeout: 9000s
+# options:
+#  machineType: 'N1_HIGHCPU_8'
