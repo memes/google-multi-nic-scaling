@@ -38,8 +38,22 @@ write_files:
           <h1>This webapp is running</h1>
         </body>
       </html>
+  - path: /etc/systemd/system/metrics.service
+    permissions: 0644
+    owner: root
+    content: |
+      [Unit]
+      Description=Synthetic Metrics
+      Wants=gcr-online.target
+      After=gcr-online.target
+
+      [Service]
+      ExecStart=/usr/bin/docker run --rm --name gce-metric memes/gce-metric:${gce_metric_ver} -verbose -type ${type} -round -floor ${floor} -ceiling ${ceiling} -period ${period} -sample ${sample} ${shape}
+      ExecStop=/usr/bin/docker stop gce-metric
+      ExecStopPost=/usr/bin/docker rm gce-metric
 
 runcmd:
   - systemctl daemon-reload
   - systemctl start iptables-webapp.service
   - systemctl start webapp.service
+  - systemctl start metrics.service

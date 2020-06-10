@@ -22,12 +22,32 @@ data "google_compute_subnetwork" "subnets" {
 locals {
   # All subnets should have the same region, use the first subnet's region as the target region
   region = element(compact(distinct([for subnet in data.google_compute_subnetwork.subnets : subnet.region])), 0)
-  metadata = merge(var.metadata, {
+}
+
+# Get the current zones for the region; RMIG has constraints around the number
+# of zones in region - see update_policy_max_surge/unavailable_fixed locals below
+data "google_compute_zones" "zones" {
+  project = var.project_id
+  region  = local.region
+}
+
+
+locals {
+  webapp_metadata = merge(var.metadata, {
     enable-oslogin = upper(var.enable_os_login)
-    user-data = templatefile("${path.module}/templates/cloud-config.tpl", {
+    user-data = templatefile("${path.module}/templates/webapp-cloud-config.tpl", {
+      gce_metric_ver = "1.0.5",
+      floor          = var.synthetic_metric_floor,
+      ceiling        = var.synthetic_metric_ceiling,
+      period         = var.synthetic_metric_period,
+      sample         = var.synthetic_metric_sample_period,
+      shape          = var.synthetic_metric_shape,
+      type           = var.autoscaling_metric_name
     })
   })
-  nic0_network = [for subnet in data.google_compute_subnetwork.subnets : subnet.network][0]
+  nic0_network                        = [for subnet in data.google_compute_subnetwork.subnets : subnet.network][0]
+  update_policy_max_surge_fixed       = max(var.update_policy_max_surge_fixed, length(data.google_compute_zones.zones))
+  update_policy_max_unavailable_fixed = max(var.update_policy_max_unavailable_fixed, length(data.google_compute_zones.zones))
 }
 
 # Create service account for webapp vm
@@ -35,7 +55,7 @@ module "service_accounts" {
   source     = "terraform-google-modules/service-accounts/google"
   version    = "2.0.2"
   project_id = var.project_id
-  names      = ["webapp"]
+  names      = ["webapp", "metrics"]
   project_roles = [
     "${var.project_id}=>roles/logging.logWriter",
     "${var.project_id}=>roles/monitoring.metricWriter",
@@ -66,8 +86,8 @@ resource "google_compute_firewall" "mig_hc" {
   }
 }
 
-# Allow IAP on nic0
-resource "google_compute_firewall" "iap" {
+# Allow IAP on nic0 to webapp instances
+resource "google_compute_firewall" "webapp_iap" {
   project     = var.project_id
   name        = "webapp-allow-iap"
   network     = local.nic0_network
@@ -117,14 +137,16 @@ resource "google_compute_instance_template" "webapp" {
   instance_description = "Multi-nic webapp"
   region               = local.region
 
-  metadata = local.metadata
+  metadata = local.webapp_metadata
   labels   = var.labels
   tags     = var.tags
 
   machine_type = var.machine_type
   service_account {
-    email  = module.service_accounts.emails["webapp"]
-    scopes = []
+    email = module.service_accounts.emails["webapp"]
+    scopes = [
+      "https://www.googleapis.com/auth/cloud-platform",
+    ]
   }
 
   scheduling {
@@ -146,11 +168,16 @@ resource "google_compute_instance_template" "webapp" {
     content {
       subnetwork         = network_interface.value["name"]
       subnetwork_project = network_interface.value["project"]
+      # Give each nic a public IP
+      access_config {}
     }
   }
 
   lifecycle {
     create_before_destroy = true
+    ignore_changes = [
+      network_interface
+    ]
   }
 }
 
@@ -171,7 +198,6 @@ resource "google_compute_region_instance_group_manager" "webapp" {
   description        = "Regional MIG for webapp instances in ${local.region}"
   region             = local.region
   base_instance_name = "webapp"
-  target_size        = var.target_size
   wait_for_instances = false
 
   version {
@@ -187,12 +213,29 @@ resource "google_compute_region_instance_group_manager" "webapp" {
   update_policy {
     type                  = var.update_policy_type
     minimal_action        = var.update_policy_minimal_action
-    max_surge_fixed       = var.update_policy_max_surge_fixed
-    max_unavailable_fixed = var.update_policy_max_unavailable_fixed
+    max_surge_fixed       = local.update_policy_max_surge_fixed
+    max_unavailable_fixed = local.update_policy_max_unavailable_fixed
     min_ready_sec         = var.update_policy_min_ready_sec
   }
 
   lifecycle {
     create_before_destroy = true
+  }
+}
+
+resource "google_compute_region_autoscaler" "webapp" {
+  project = var.project_id
+  name    = "webapp-${local.region}"
+  region  = local.region
+  target  = google_compute_region_instance_group_manager.webapp.id
+  autoscaling_policy {
+    max_replicas    = var.autoscaling_max_replicas
+    min_replicas    = var.autoscaling_min_replicas
+    cooldown_period = var.autoscaling_cooldown_period
+    metric {
+      name   = var.autoscaling_metric_name
+      target = var.autoscaling_metric_target
+      type   = var.autoscaling_metric_type
+    }
   }
 }
