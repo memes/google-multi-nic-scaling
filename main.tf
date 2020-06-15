@@ -36,7 +36,7 @@ locals {
   webapp_metadata = merge(var.metadata, {
     enable-oslogin = upper(var.enable_os_login)
     user-data = templatefile("${path.module}/templates/webapp-cloud-config.tpl", {
-      gce_metric_ver = "1.0.5",
+      gce_metric_ver = "1.1.0",
       floor          = var.synthetic_metric_floor,
       ceiling        = var.synthetic_metric_ceiling,
       period         = var.synthetic_metric_period,

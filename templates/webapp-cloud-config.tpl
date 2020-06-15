@@ -48,7 +48,7 @@ write_files:
       After=gcr-online.target
 
       [Service]
-      ExecStart=/usr/bin/docker run --rm --name gce-metric memes/gce-metric:${gce_metric_ver} -verbose -type ${type} -round -floor ${floor} -ceiling ${ceiling} -period ${period} -sample ${sample} ${shape}
+      ExecStart=/usr/bin/docker run --rm --name gce-metric memes/gce-metric:${gce_metric_ver} ${shape} -verbose -type ${type} -round -floor ${floor} -ceiling ${ceiling} -period ${period} -sample ${sample}
       ExecStop=/usr/bin/docker stop gce-metric
       ExecStopPost=/usr/bin/docker rm gce-metric
 
