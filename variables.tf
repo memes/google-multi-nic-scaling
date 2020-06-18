@@ -98,10 +98,10 @@ EOD
 
 variable "source_image" {
   type        = string
-  default     = "cos-cloud/cos-stable"
+  default     = "ubuntu-os-cloud/ubuntu-1804-lts"
   description = <<EOD
-The source image to use for webapp VMs. Default is 'cos-cloud/cos-stable' to use
-latest Container-Optimized OS image at apply time.
+The source image to use for webapp VMs. Default is 'ubuntu-os-cloud/ubuntu-1804-lts'
+to use latest Ubuntu 18.04 LTS image at apply time.
 EOD
 }
 
